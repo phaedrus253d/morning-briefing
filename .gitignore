@@ -1,0 +1,4 @@
+*.db3
+.spyproject
+data
+morning-briefing/__pycache__
