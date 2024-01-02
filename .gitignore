@@ -2,3 +2,4 @@
 .spyproject
 data
 morning-briefing/__pycache__
+credentials.json
