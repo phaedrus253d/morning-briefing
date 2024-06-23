@@ -8,7 +8,7 @@ import datetime
 import requests
 from requests.auth import HTTPBasicAuth
 
-
+#from datetime import datetime
 
 import warnings
 
@@ -16,17 +16,38 @@ import warnings
 
 
 
-def load_data():
-    check_data()
-    with open('./data/tables.txt') as f:
-        tableNames = f.read().splitlines()
-    db = pd.Series(index=tableNames)
-    for index, value in db.items():
-        db[index] = pd.read_pickle('./data/'+str(index)+'.pkl')
-    
-    log = pull_data()
-    
-    return db
+def load(pullNew = True, location='./data', debug=False):
+    columnsToKeep = ['guid', 'start', 'finish', 'name', 'is_deleted']
+    try:
+        db = pd.read_pickle(location+'/db.pkl')
+    except:
+        check_data()
+        tableNames = [ x[:-4] for x in os.listdir(location)]
+        db = pd.Series(index=tableNames, dtype=object)
+        for index, value in db.items():
+            db[index] = pd.read_pickle(location+'/'+str(index)+'.pkl')
+        
+        
+        db = db['time_interval2']
+    if pullNew:
+        oldNumEntries = db.shape[0]
+        print("Old data had", db.shape[0],"entries")
+        backup=location+'/backups/db-'+datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')+'.pkl'
+        db.to_pickle(backup)
+        if debug:
+            log = pd.read_pickle('./log.pkl')
+        else:
+            log = pull_data()
+        print("Retrieved data had", log.shape,"entries")
+        log = log.rename(columns={"guid_x":"guid", "from":"start", "to":"finish","deleted":"is_deleted"})
+        log['guid'] = log['guid'].str.upper()
+        
+        db = pd.concat([db[columnsToKeep], log[columnsToKeep]])
+        db = db.drop_duplicates()
+        print("New data has", db.shape[0],"entries")
+        print("Added", db.shape[0]-oldNumEntries, "entries")
+        db.to_pickle(location+"/db.pkl")
+    return db[columnsToKeep]
 
 
 # Check if we need to convert sqlite to pandas.
@@ -34,7 +55,7 @@ def load_data():
 # is a .database.db3 file it ensures ./data exists and
 # calls convert_sql_to_pandas
 def check_data():
-    if not os.path.exists('./data/tables.txt'):
+    if not os.path.exists('./data/time_interval2.pkl'):
         if os.path.exists('./.database.db3'):
             if not os.path.exists('./data'):
                 os.makedirs('./data')
@@ -53,14 +74,21 @@ def convert_sql_to_pandas():
     cur = con.cursor()
     cur.execute(sql_query)
     tables = cur.fetchall()
-    tableList = []
     for table in tables:
         pd_table = pd.read_sql_query("SELECT * from "+table[0], con)
         pd_table.to_pickle('./data/'+table[0]+'.pkl')
-        tableList.append(table[0]+'\n')
-        
-    with open('./data/tables.txt', 'w') as f:
-        f.writelines(tableList)
+    
+    fix_time_interval()
+
+    
+    
+def fix_time_interval():
+    table = pd.read_pickle('./data/time_interval2.pkl')
+    activities = pd.read_pickle('./data/activity_type.pkl')
+    table['start'] = table['start'].apply(lambda x : datetime.datetime.fromtimestamp(float(x)))
+    table['finish'] = table['finish'].apply(lambda x : datetime.datetime.fromtimestamp(float(x)))
+    table = pd.merge(table,activities[['id','name']], left_on='activity_type_id', right_on='id', how='left')
+    table.to_pickle('./data/time_interval2.pkl')
     
 def get_atimelogger_types(auth_header):
     """
@@ -90,8 +118,8 @@ def get_atimelogger_intervals(auth_header, INTERVAL_MAX=100):
     edf = pd.DataFrame.from_dict(intervals['intervals'])
 
     # Convert to times
-    #edf['from'] = edf['from'].apply(lambda x : datetime.date.fromtimestamp(float(x)))
-    #edf['to'] = edf['to'].apply(lambda x : datetime.date.fromtimestamp(float(x)))
+    edf['from'] = edf['from'].apply(lambda x : datetime.datetime.fromtimestamp(float(x)))
+    edf['to'] = edf['to'].apply(lambda x : datetime.datetime.fromtimestamp(float(x)))
     edf['type'] = edf['type'].astype(str)
     edf['type_id'] = edf['type'].str.extract(r": \'(.*?)\'")
     return edf
@@ -113,11 +141,9 @@ def pull_data():
     auth_header = HTTPBasicAuth(USERNAME, PASSWORD)
     
     types_atimelogger_df = get_atimelogger_types(auth_header)
-    types_atimelogger_df.head(1)
     
     entries_atimelogger_df = get_atimelogger_intervals(auth_header)
     
     log_df = pd.merge(entries_atimelogger_df, types_atimelogger_df[['guid', 'name']], left_on = 'type_id', right_on = 'guid')
-    log_df.head(1) 
     log_df.to_pickle('./log.pkl')
     return log_df
