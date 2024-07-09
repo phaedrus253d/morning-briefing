@@ -11,17 +11,17 @@ from requests.auth import HTTPBasicAuth
 #from datetime import datetime
 
 import warnings
+columnsToKeep = ['guid', 'start', 'finish', 'name', 'is_deleted']
 
 
 
 
-
-def load(pullNew = True, location='./data', debug=False):
+def load(pullNew = True, location='./data', debug=False, backup=True):
     columnsToKeep = ['guid', 'start', 'finish', 'name', 'is_deleted']
     try:
         db = pd.read_pickle(location+'/db.pkl')
     except:
-        check_data()
+        import_exported_database()
         tableNames = [ x[:-4] for x in os.listdir(location)]
         db = pd.Series(index=tableNames, dtype=object)
         for index, value in db.items():
@@ -32,8 +32,9 @@ def load(pullNew = True, location='./data', debug=False):
     if pullNew:
         oldNumEntries = db.shape[0]
         print("Old data had", db.shape[0],"entries")
-        backup=location+'/backups/db-'+datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')+'.pkl'
-        db.to_pickle(backup)
+        if backup:
+            backup=location+'/backups/db-'+datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')+'.pkl'
+            db.to_pickle(backup)
         if debug:
             log = pd.read_pickle('./log.pkl')
         else:
@@ -54,12 +55,15 @@ def load(pullNew = True, location='./data', debug=False):
 # If there are not pandas databases in ./data and there
 # is a .database.db3 file it ensures ./data exists and
 # calls convert_sql_to_pandas
-def check_data():
-    if not os.path.exists('./data/time_interval2.pkl'):
-        if os.path.exists('./.database.db3'):
+def import_exported_database(db = './.database.db3', overwrite=False):
+    if not os.path.exists('./data/time_interval2.pkl') or overwrite:
+        if os.path.exists(db):
             if not os.path.exists('./data'):
                 os.makedirs('./data')
-            convert_sql_to_pandas()
+            convert_sql_to_pandas(db)
+            db = pd.read_pickle('./data/time_interval2.pkl')
+            return db[columnsToKeep]
+            
         else:
             print("No sqlite3 or pandas data found, exiting")
             exit()
@@ -67,8 +71,8 @@ def check_data():
             
 
 
-def convert_sql_to_pandas():
-    con = sqlite3.connect(".database.db3")
+def convert_sql_to_pandas(db):
+    con = sqlite3.connect(db)
     sql_query = """SELECT name FROM sqlite_master  
       WHERE type='table';"""
     cur = con.cursor()
@@ -80,7 +84,18 @@ def convert_sql_to_pandas():
     
     fix_time_interval()
 
-    
+def merge_current_and_new_db(newdb='./.database.db3'):
+    db = pd.read_pickle('./data/db.pkl')
+    oldNumEntries = db.shape[0]
+    print("Old data had", oldNumEntries ,"entries")
+    backup='./data/backups/db-'+datetime.datetime.today().strftime('%Y-%m-%d-%H-%M-%S')+'.pkl'
+    db.to_pickle(backup)
+    newdb = import_exported_database(newdb, overwrite=True)
+    db = pd.concat([db, newdb])
+    db = db.drop_duplicates()
+    print("New data has", db.shape[0],"entries")
+    print("Added", db.shape[0]-oldNumEntries, "entries")
+    db.to_pickle("./data/db.pkl")
     
 def fix_time_interval():
     table = pd.read_pickle('./data/time_interval2.pkl')
@@ -147,3 +162,5 @@ def pull_data():
     log_df = pd.merge(entries_atimelogger_df, types_atimelogger_df[['guid', 'name']], left_on = 'type_id', right_on = 'guid')
     log_df.to_pickle('./log.pkl')
     return log_df
+
+#merge_current_and_new_db()

@@ -24,6 +24,10 @@ def bin_data(db, startTime, numBins, frequency='H', t=None):
     else:
         t = pd.date_range(startTime, periods=numBins+1, freq=frequency)
     bins = pd.DataFrame(pd.Timedelta(0), index=t, columns=db['name'].unique())
+    
+    # Cut out any data that ended before the start time
+    #db = db[db['finish'] < startTime]
+    
     binSize = t[1] - t[0]
     for i in range(0,numBins):
         if i%1000 == 0 and len(t) > 10000:
@@ -48,7 +52,7 @@ def bin_data(db, startTime, numBins, frequency='H', t=None):
 
 def fix_columns(bins):
     if 'Walk' in bins.columns:
-        bins['Exercise'] += bins['Walk']
+        bins.loc[:,'Exercise'] += bins['Walk']
         bins = bins.drop('Walk', axis=1)
         
     if 'Data analysis' in bins.columns:
@@ -75,7 +79,7 @@ def categorize_columns(bins):
     new['Low leisure'] = bins[['Media', 'Leisure', 'Video games']].sum(axis=1)
     return new
 
-def data_by_time_of_day(db, firstDay = None, lastDay = None, step = pd.Timedelta(1, 'H')):
+def data_by_time_of_day(db, firstDay = None, lastDay = None, step = pd.Timedelta(1, 'h')):
     #Trim incomplete days
     if not firstDay:
         firstDay = dt.date(db['start'].min()+pd.Timedelta(23, 'h'))
@@ -130,9 +134,9 @@ def get_signoff():
         return signoffs[i]
     
 
-debug = True
+debug = False
 # Load data
-db = pull_data.load(pullNew=True)#, debug=debug)
+db = pull_data.load(pullNew=True, debug=debug)
 #dbOld = load_data(pullNew=False, location='./dataOld')
 print(db.shape)
 # Load list of signoffs from file
@@ -156,21 +160,22 @@ plot_day_data(categorize_columns(day), categorize_columns(stddev))
 
 # %%
 
-def productivity_report(db, day=None):
+def productivity_report(db, day=None, numDaysPast=1):
     if not day: # default to yesterday
-        day = dt.date(dt.today()) - pd.Timedelta(1, 'D')
-    data = categorize_columns(bin_data(db, day, numBins=1, frequency = 'D')).iloc[0]
+        day = dt.date(dt.today()) - pd.Timedelta(numDaysPast, 'D')
+    data = categorize_columns(bin_data(db, day, numBins=numDaysPast, frequency = 'D')).sum()
+    #data.shape()
     consciousHours = data.sum() - data['Sleep']
     productive = (data['Obligations']+data['Work']+data['Volunteering'])/consciousHours
     highLeisure = data['High leisure']/consciousHours
     lowLeisure = data['Low leisure']/consciousHours
-    report = "You spent {:.0%} of your time yesterday in production, {:.0%} "\
+    report = "You spent {:.0%} of your time in production, {:.0%} "\
         "of your time in high leisure, and {:.0%} of your time in low leisure."\
             .format(productive, highLeisure, lowLeisure)
     return report
 
-productivity_report(db)
-
+print(productivity_report(db, numDaysPast = 365))
+print(productivity_report(db, numDaysPast = 1))
 
 #hours.to_pickle('hours.pkl')
 #bins.to_pickle('bins.pkl')
