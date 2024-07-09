@@ -104,3 +104,14 @@ def data_by_time_of_day(db, firstDay = None, lastDay = None, step = pd.Timedelta
     
     
     return bins, day, stddev
+
+def divide_into_classes(db, day, numDaysPast):
+    if not day: # default to yesterday
+        day = dt.date(dt.today()) - pd.Timedelta(numDaysPast, 'D')
+    data =categorize_columns(bin_data(db, day, numBins=numDaysPast, frequency = 'D')).sum()
+    #data.shape()
+    consciousHours = data.sum() - data['Sleep']
+    productive = (data['Obligations']+data['Work']+data['Volunteering'])/consciousHours
+    highLeisure = data['High leisure']/consciousHours
+    lowLeisure = data['Low leisure']/consciousHours
+    return [consciousHours, productive, highLeisure, lowLeisure]
