@@ -22,20 +22,30 @@ debug = True
 def get_signoff():
     with open('./signoffs.txt') as f:
         signoffs = f.read().splitlines()
-        i = np.randint(0, len(signoffs))
+        i = np.random.randint(0, len(signoffs))
         return signoffs[i]
 
-def productivity_report(db, day=None, numDaysPast=1):
-    [consciousHours, productive, highLeisure, lowLeisure] = analysis.divide_into_classes(db, day, numDaysPast)
-    if numDaysPast == 1:
-        time = 'yesterday'
-    elif numDaysPast == 365:
-        time='last year'
-    else:
-        time = 'the last {} days in production'.format(numDaysPast)
-    report = "You spent {:.0%} of your time {time} in production, {:.0%} "\
-        "of your time in high leisure, and {:.0%} of your time in low leisure."\
-            .format(productive, highLeisure, lowLeisure, time=time)
+def productivity_report(db):
+    yesterday = analysis.divide_into_classes(db)
+    lastyear = analysis.divide_into_classes(db, numDaysPast=365)
+    hours = yesterday*(yesterday['conscious']/pd.Timedelta(1, 'h'))
+
+    report = "Yesterday you spent {:.1f} hours in production, {:.1f} "\
+        "hours in high leisure, and {:.1f} hours in low leisure."\
+            .format(hours['productive'],
+                    hours['highLeisure'],
+                    hours['lowLeisure'])
+
+
+    compare = yesterday > lastyear
+    compare = compare.replace({True: "more", False: "less"})
+    diff = ((yesterday - lastyear)/lastyear).abs()
+    report += "\nThis is {:.0%} {} productive, {:.0%} {} active leisure, "\
+        "and {:.0%} {} passive leisure than average for the last year.".format(
+            diff['productive'], compare['productive'],
+            diff['highLeisure'],compare['highLeisure'],
+            diff['lowLeisure'], compare['lowLeisure'])
+
     return report
 
 #debug = False
@@ -59,14 +69,14 @@ yesterday = today - pd.Timedelta(1, 'D')
 
 parser=argparse.ArgumentParser()
 parser.add_argument("--ti", type=int, default=25)
-parser.add_argument("--v", type=int, default=25)
-parser.add_argument("--cr", type=int, default=25)
-parser.add_argument("--w", type=int, default=25)
-parser.add_argument("--bins", type=str, default='', help='Interval to bin by (m, h, d) skipped if not passed')
-parser.add_argument("--input", type=str, help = ".npy file containing multiple compositions")
+parser.add_argument("--bins", type=str, default='m', choices=['m', 'h', 'd', 'y'],
+                    help='Interval to bin by')
+parser.add_argument("--recalculatebins", action = 'store_true')
 parser.add_argument("--update", action = 'store_true')
+parser.add_argument("--backup", action = 'store_true')
 parser.add_argument("--graphing", action = 'store_true')
 parser.add_argument("--report", action = 'store_true')
+parser.add_argument("--verbose", action = 'store_true')
 parser.add_argument("--debug", action = 'store_true')
 args=parser.parse_args()
 
@@ -74,17 +84,22 @@ if args.debug:
     args.update=False
     debug=True
     args.report=True
+    args.verbose = False
+
 # Load data
-db = pull_data.load(pullNew=args.update, debug=debug, backup=False)
+db = pull_data.load(pullNew=args.update, debug=debug, backup=args.backup, verbose=args.verbose)
 
-
-
-# %% Graphing
-if args.graphing:
+if args.recalculatebins:
+    [bins, day, stddev] = analysis.bin_data(db, step=pd.Timedelta(1, args.bins))
+#if args.bins != '':
     [bins, day, stddev] = analysis.data_by_time_of_day(db, step=pd.Timedelta(1, 'm'))
     bins.to_pickle('minutes.pkl')
     day.to_pickle('day.pkl')
     stddev.to_pickle('stddev.pkl')
+
+# %% Graphing
+if args.graphing:
+
 
 
     #day = pd.read_pickle('day.pkl')
@@ -97,5 +112,9 @@ if args.graphing:
 
 
 if args.report:
-    print(productivity_report(db, numDaysPast = 365))
-    print(productivity_report(db, numDaysPast = 1))
+    report = [
+        "Good morning!",
+        productivity_report(db),
+        get_signoff()]
+
+    [print(x,'\n') for x in report]

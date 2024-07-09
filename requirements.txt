@@ -1,2 +1,6 @@
+python=3.10
 pandas
-sqlite3
+numpy
+matplotlib
+urllib3
+requests
